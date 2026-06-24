@@ -217,16 +217,14 @@
     svg.setAttribute('viewBox','0 0 '+w+' '+h);
     var d=buildRoughPath(w,h), bg=svg.querySelector('.bg'), fg=svg.querySelector('.fg');
     bg.setAttribute('d',d); fg.setAttribute('d',d);
-    var len=fg.getTotalLength();
-    bg.style.strokeDasharray=len; fg.style.strokeDasharray=len;
-    return len;
+    return fg.getTotalLength();
   }
   function setStrikeProgress(svg,len,p,animated){
     var bg=svg.querySelector('.bg'), fg=svg.querySelector('.fg');
-    var off=len*(1-Math.max(0,Math.min(1,p)));
-    var trans=animated?'stroke-dashoffset .25s ease':'none';
+    var on=Math.max(0,Math.min(1,p))*len, gap=len*2+20;
+    var trans=animated?'stroke-dasharray .25s ease':'none';
     bg.style.transition=trans; fg.style.transition=trans;
-    bg.style.strokeDashoffset=off; fg.style.strokeDashoffset=off;
+    bg.style.strokeDasharray=on+' '+gap; fg.style.strokeDasharray=on+' '+gap;
   }
   function dragProgress(wrap,clientX){
     var r=wrap.getBoundingClientRect();

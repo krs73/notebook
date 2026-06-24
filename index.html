@@ -144,7 +144,7 @@
 <script>
 (function(){
   var KEY='todo:v1';
-  var MAX_LINE=45, MIN_LINE=26, TAP_PX=10, COMPLETE_AT=0.6, DELETE_TH=100;
+  var MAX_LINE=45, MIN_LINE=26, TAP_PX=10, COMPLETE_AT=0.6, DELETE_TH=100, STRIKE_ANIM_MS=250;
   var scroll=document.getElementById('scroll');
   var input=document.getElementById('add');
   var weekdayEl=document.getElementById('weekday');
@@ -221,10 +221,17 @@
   }
   function setStrikeProgress(svg,len,p,animated){
     var bg=svg.querySelector('.bg'), fg=svg.querySelector('.fg');
-    var on=Math.max(0,Math.min(1,p))*len, gap=len*2+20;
-    var trans=animated?'stroke-dasharray .25s ease':'none';
+    var pp=Math.max(0,Math.min(1,p)), on=pp*len, gap=len*2+20;
+    var trans=animated?'stroke-dasharray '+STRIKE_ANIM_MS+'ms ease':'none';
     bg.style.transition=trans; fg.style.transition=trans;
     bg.style.strokeDasharray=on+' '+gap; fg.style.strokeDasharray=on+' '+gap;
+    if(pp>0){
+      bg.style.visibility='visible'; fg.style.visibility='visible';
+    } else if(animated){
+      setTimeout(function(){bg.style.visibility='hidden';fg.style.visibility='hidden';},STRIKE_ANIM_MS+10);
+    } else {
+      bg.style.visibility='hidden'; fg.style.visibility='hidden';
+    }
   }
   function dragProgress(wrap,clientX){
     var r=wrap.getBoundingClientRect();

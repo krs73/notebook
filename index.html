@@ -105,11 +105,11 @@
     font-family:'Caveat',cursive; font-weight:700; cursor:pointer; }
   .addbar button:active{ transform:scale(.95); }
 
-  /* ---- opt-in time-on-task ---- */
-  .timeBtn{ flex:0 0 auto; align-self:center; background:none; border:none; cursor:pointer;
-    margin-left:6px; padding:2px 6px; font-family:ui-sans-serif,system-ui,sans-serif;
-    font-size:calc(var(--lineH) * 0.32); color:var(--muted); white-space:nowrap; opacity:.7; }
-  .timeBtn.set{ color:var(--pencil); opacity:1; }
+  /* ---- opt-in time-on-task: long-press (touch) / click-and-hold (mouse) the row ---- */
+  .timeLabel{ flex:0 0 auto; align-self:center; margin-left:6px; padding:2px 6px;
+    font-family:ui-sans-serif,system-ui,sans-serif; font-size:calc(var(--lineH) * 0.32);
+    color:var(--pencil); white-space:nowrap; }
+  .row.pressing .card{ background:rgba(58,53,46,.07); }
   .timePop{ position:fixed; z-index:10; width:230px; background:#fff;
     border:1.5px solid #E6DCC6; border-radius:14px; padding:14px 16px;
     box-shadow:0 8px 24px rgba(0,0,0,.18); font-family:ui-sans-serif,system-ui,sans-serif; }
@@ -177,6 +177,7 @@
 (function(){
   var KEY='todo:v1';
   var MAX_LINE=45, MIN_LINE=26, TAP_PX=10, COMPLETE_AT=0.6, DELETE_TH=100, STRIKE_ANIM_MS=250;
+  var LONGPRESS_MS=480, PRESS_FEEDBACK_MS=120, OUTSIDE_CLOSE_GUARD_MS=350;
   var API_BASE='https://notebook-api-ruddy.vercel.app';
   var API_KEY_STORAGE='todo:apikey';
   var PUSH_DEBOUNCE_MS=600;
@@ -305,18 +306,14 @@
     return h12+(m==='00'?'':':'+m)+ap;
   }
   function timeRangeLabel(t){return fmt12h(t.start)+'–'+fmt12h(t.end);}
-  function updateTimeBtn(timeBtn,t){
-    if(t.start&&t.end){timeBtn.textContent=timeRangeLabel(t);timeBtn.classList.add('set');}
-    else{timeBtn.textContent='🕐';timeBtn.classList.remove('set');}
-  }
 
-  var editingTask=null;
+  var editingTask=null, timePopOpenedAt=0;
   function closeTimePop(){timePop.classList.add('hidden');editingTask=null;}
-  function openTimePop(btn,t){
-    editingTask=t;
+  function openTimePop(anchorEl,t){
+    editingTask=t; timePopOpenedAt=Date.now();
     timeStart.value=t.start||''; timeEnd.value=t.end||'';
     timePop.classList.remove('hidden');
-    var r=btn.getBoundingClientRect();
+    var r=anchorEl.getBoundingClientRect();
     var left=Math.max(8,Math.min(r.left,window.innerWidth-238));
     timePop.style.top=(r.bottom+8)+'px'; timePop.style.left=left+'px';
   }
@@ -333,9 +330,35 @@
   timeDone.addEventListener('click',closeTimePop);
   document.addEventListener('mousedown',function(e){
     if(timePop.classList.contains('hidden'))return;
-    if(timePop.contains(e.target)||e.target.classList.contains('timeBtn'))return;
+    if(timePop.contains(e.target))return;
+    if(Date.now()-timePopOpenedAt<OUTSIDE_CLOSE_GUARD_MS)return;
     closeTimePop();
   });
+
+  function makeLongPress(opts){
+    var timer=null, feedbackTimer=null, sx=0, sy=0, fired=false, active=false;
+    function clearTimers(){clearTimeout(timer);clearTimeout(feedbackTimer);}
+    function start(x,y){
+      active=true; fired=false; sx=x; sy=y; clearTimers();
+      feedbackTimer=setTimeout(function(){if(active&&opts.onPressStart)opts.onPressStart();},PRESS_FEEDBACK_MS);
+      timer=setTimeout(function(){
+        if(!active)return; fired=true;
+        if(opts.onPressEnd)opts.onPressEnd();
+        opts.onFire();
+      },LONGPRESS_MS);
+    }
+    function move(x,y){
+      if(!active||fired)return;
+      if(Math.abs(x-sx)>TAP_PX||Math.abs(y-sy)>TAP_PX){
+        active=false; clearTimers(); if(opts.onPressEnd)opts.onPressEnd();
+      }
+    }
+    function cancel(){
+      if(active&&!fired&&opts.onPressEnd)opts.onPressEnd();
+      active=false; clearTimers();
+    }
+    return {start:start, move:move, cancel:cancel, fired:function(){return fired;}};
+  }
   function buildStrikeSvg(svg,txt){
     var w=Math.max(10,txt.clientWidth), h=Math.max(20,txt.clientHeight);
     svg.setAttribute('width',w); svg.setAttribute('height',h);
@@ -368,6 +391,12 @@
     var len=buildStrikeSvg(svg,txt), dragging=false, startX=0, moved=0;
     setStrikeProgress(svg,len,t.done?1:0,false);
 
+    var lp=makeLongPress({
+      onPressStart:function(){li.classList.add('pressing');},
+      onPressEnd:function(){li.classList.remove('pressing');},
+      onFire:function(){dragging=false; setStrikeProgress(svg,len,t.done?1:0,false); openTimePop(li,t);}
+    });
+
     function start(x){dragging=true;moved=0;startX=x;
       len=buildStrikeSvg(svg,txt); setStrikeProgress(svg,len,t.done?1:0,false);}
     function move(x){if(!dragging)return;
@@ -380,23 +409,35 @@
       li.classList.toggle('done',t.done); updateHeaderCounts(); save(); schedulePush(state.current);
     }
 
-    wrap.addEventListener('touchstart',function(e){e.stopPropagation();start(e.touches[0].clientX);},{passive:true});
-    wrap.addEventListener('touchmove',function(e){if(dragging){if(e.cancelable)e.preventDefault();
-      move(e.touches[0].clientX);}},{passive:false});
-    wrap.addEventListener('touchend',function(e){e.stopPropagation();finish(e.changedTouches[0].clientX);});
-    wrap.addEventListener('touchcancel',function(e){e.stopPropagation();dragging=false;setStrikeProgress(svg,len,t.done?1:0,false);});
-    wrap.addEventListener('mousedown',function(e){e.stopPropagation();start(e.clientX);
-      var mm=function(ev){move(ev.clientX);};
-      var mu=function(ev){finish(ev.clientX);window.removeEventListener('mousemove',mm);window.removeEventListener('mouseup',mu);};
+    wrap.addEventListener('touchstart',function(e){e.stopPropagation();
+      start(e.touches[0].clientX); lp.start(e.touches[0].clientX,e.touches[0].clientY);},{passive:true});
+    wrap.addEventListener('touchmove',function(e){lp.move(e.touches[0].clientX,e.touches[0].clientY); if(lp.fired())return;
+      if(dragging){if(e.cancelable)e.preventDefault(); move(e.touches[0].clientX);}},{passive:false});
+    wrap.addEventListener('touchend',function(e){e.stopPropagation();
+      if(lp.fired()){lp.cancel();return;} lp.cancel(); finish(e.changedTouches[0].clientX);});
+    wrap.addEventListener('touchcancel',function(e){e.stopPropagation();dragging=false;lp.cancel();
+      setStrikeProgress(svg,len,t.done?1:0,false);});
+    wrap.addEventListener('mousedown',function(e){e.stopPropagation();
+      start(e.clientX); lp.start(e.clientX,e.clientY);
+      var mm=function(ev){lp.move(ev.clientX,ev.clientY); if(lp.fired())return; move(ev.clientX);};
+      var mu=function(ev){window.removeEventListener('mousemove',mm);window.removeEventListener('mouseup',mu);
+        if(lp.fired()){lp.cancel();return;} lp.cancel(); finish(ev.clientX);};
       window.addEventListener('mousemove',mm);window.addEventListener('mouseup',mu);});
   }
 
   function attachSwipeDelete(li,t){
     var card=li.querySelector('.card'), reveal=li.querySelector('.reveal');
     var sx=0,sy=0,axis=null,on=false,dx=0;
-    function begin(x,y){on=true;sx=x;sy=y;axis=null;dx=0;card.style.transition='none';}
+    var lp=makeLongPress({
+      onPressStart:function(){li.classList.add('pressing');},
+      onPressEnd:function(){li.classList.remove('pressing');},
+      onFire:function(){on=false;axis=null;card.style.transition='';card.style.transform='translateX(0)';
+        reveal.style.opacity=0; openTimePop(li,t);}
+    });
+    function begin(x,y){on=true;sx=x;sy=y;axis=null;dx=0;card.style.transition='none';lp.start(x,y);}
     function move(x,y,ev){
       if(!on)return;
+      lp.move(x,y); if(lp.fired())return;
       var ddx=x-sx,ddy=y-sy;
       if(axis===null){if(Math.abs(ddx)>6||Math.abs(ddy)>6){axis=Math.abs(ddx)>Math.abs(ddy)?'h':'v';}else return;}
       if(axis==='v')return;
@@ -405,6 +446,8 @@
       reveal.style.opacity=Math.min(-dx/DELETE_TH,1);
     }
     function end(){
+      if(lp.fired()){lp.cancel();on=false;return;}
+      lp.cancel();
       if(!on)return; on=false; card.style.transition='';
       if(dx<-DELETE_TH){card.style.transform='translateX(-120%)'; var id=t.id;
         setTimeout(function(){removeTask(id);},170);}
@@ -441,14 +484,10 @@
         '<span class="txt-wrap"><span class="txt"></span>'+
         '<svg class="strike" xmlns="http://www.w3.org/2000/svg"><path class="bg"></path><path class="fg"></path></svg>'+
         '</span>'+
-        '<button class="timeBtn" type="button" aria-label="Set time for this task"></button>'+
+        (t.start&&t.end?'<span class="timeLabel"></span>':'')+
         '</div>';
       li.querySelector('.txt').textContent=t.text;
-      var timeBtn=li.querySelector('.timeBtn');
-      updateTimeBtn(timeBtn,t);
-      timeBtn.addEventListener('mousedown',function(e){e.stopPropagation();});
-      timeBtn.addEventListener('touchstart',function(e){e.stopPropagation();},{passive:true});
-      timeBtn.addEventListener('click',function(e){e.stopPropagation();openTimePop(timeBtn,t);});
+      if(t.start&&t.end)li.querySelector('.timeLabel').textContent=timeRangeLabel(t);
       attachSwipeDelete(li,t);
       scroll.appendChild(li);
       requestAnimationFrame(function(){attachStrike(li,t);});

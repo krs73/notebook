@@ -86,6 +86,7 @@
   .txt{ display:block; font-size:calc(var(--lineH) * 0.7); line-height:var(--lineH);
     color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
     user-select:none; -webkit-user-select:none; }
+  .row.carried .txt{ color:var(--red); }
   .row.done .txt{ color:var(--muted); }
   .strike{ position:absolute; left:0; top:0; pointer-events:none; overflow:visible; }
   .strike .bg{ fill:none; stroke:var(--pencil); stroke-width:2.4; opacity:.4;
@@ -246,16 +247,43 @@
       .then(function(r){if(!r.ok)throw new Error('bad status');return r.json();})
       .then(function(data){
         state.pages[date]=data.tasks; save();
-        if(date===state.current)render();
+        if(date===state.current){render();if(date===todayStr())carryForward();}
       })
       .catch(function(){});
+  }
+
+  function carryForward(){
+    var today=todayStr();
+    if(state.current!==today)return;
+    var toCarry=[], modifiedDates=[];
+    Object.keys(state.pages).sort().forEach(function(d){
+      if(d>=today)return;
+      var remaining=[], moved=false;
+      (state.pages[d]||[]).forEach(function(t){
+        if(!t.done&&!t.start&&!t.end){
+          toCarry.push(Object.assign({},t,{carriedOver:true}));
+          moved=true;
+        } else {
+          remaining.push(t);
+        }
+      });
+      if(moved){state.pages[d]=remaining;modifiedDates.push(d);}
+    });
+    if(toCarry.length===0)return;
+    var todayIds=new Set((state.pages[today]||[]).map(function(t){return t.id;}));
+    var fresh=toCarry.filter(function(t){return !todayIds.has(t.id);});
+    if(fresh.length===0)return;
+    state.pages[today]=fresh.concat(state.pages[today]||[]);
+    save();render();
+    modifiedDates.forEach(function(d){schedulePush(d);});
+    schedulePush(today);
   }
 
   function shift(n){closeTimePop();var d=parseISO(state.current);d.setDate(d.getDate()+n);state.current=iso(d);
     save();render();syncDateFromServer(state.current);}
   document.getElementById('prev').onclick=function(){shift(-1);};
   document.getElementById('next').onclick=function(){shift(1);};
-  todayBtn.onclick=function(){closeTimePop();state.current=todayStr();save();render();syncDateFromServer(state.current);};
+  todayBtn.onclick=function(){closeTimePop();state.current=todayStr();save();render();syncDateFromServer(state.current);carryForward();};
   picker.onchange=function(){if(picker.value){closeTimePop();state.current=picker.value;
     save();render();syncDateFromServer(state.current);}};
 
@@ -479,7 +507,7 @@
       scroll.appendChild(e); return;
     }
     list.forEach(function(t){
-      var li=document.createElement('div'); li.className='row'+(t.done?' done':'');
+      var li=document.createElement('div'); li.className='row'+(t.done?' done':'')+(t.carriedOver?' carried':'');
       li.innerHTML='<div class="reveal">tear out ✕</div><div class="card">'+
         '<span class="txt-wrap"><span class="txt"></span>'+
         '<svg class="strike" xmlns="http://www.w3.org/2000/svg"><path class="bg"></path><path class="fg"></path></svg>'+
@@ -500,6 +528,7 @@
   });
 
   render();
+  carryForward();
   Object.keys(state.pendingDates).forEach(function(d){if(d!==state.current)flushPush(d);});
   syncDateFromServer(state.current);
 })();

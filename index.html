@@ -84,7 +84,8 @@
   }
   .txt-wrap{ position:relative; flex:0 1 auto; min-width:0; touch-action:none; }
   .txt{ display:block; font-size:calc(var(--lineH) * 0.7); line-height:var(--lineH);
-    color:var(--ink); word-break:break-word; user-select:none; -webkit-user-select:none; }
+    color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    user-select:none; -webkit-user-select:none; }
   .row.done .txt{ color:var(--muted); }
   .strike{ position:absolute; left:0; top:0; pointer-events:none; overflow:visible; }
   .strike .bg{ fill:none; stroke:var(--pencil); stroke-width:2.4; opacity:.4;
@@ -103,6 +104,25 @@
     background:var(--pencil); color:#fff; font-size:45px; line-height:1;
     font-family:'Caveat',cursive; font-weight:700; cursor:pointer; }
   .addbar button:active{ transform:scale(.95); }
+
+  /* ---- opt-in time-on-task ---- */
+  .timeBtn{ flex:0 0 auto; align-self:center; background:none; border:none; cursor:pointer;
+    margin-left:6px; padding:2px 6px; font-family:ui-sans-serif,system-ui,sans-serif;
+    font-size:calc(var(--lineH) * 0.32); color:var(--muted); white-space:nowrap; opacity:.7; }
+  .timeBtn.set{ color:var(--pencil); opacity:1; }
+  .timePop{ position:fixed; z-index:10; width:230px; background:#fff;
+    border:1.5px solid #E6DCC6; border-radius:14px; padding:14px 16px;
+    box-shadow:0 8px 24px rgba(0,0,0,.18); font-family:ui-sans-serif,system-ui,sans-serif; }
+  .timePop.hidden{ display:none; }
+  .timePop .row2{ display:flex; align-items:center; gap:8px; }
+  .timePop input[type=time]{ flex:1; min-width:0; font-family:inherit; font-size:16px;
+    border:1px solid #E6DCC6; border-radius:8px; padding:6px 8px;
+    background:#FBF7EC; color:var(--ink); }
+  .timePop .actions{ display:flex; justify-content:space-between; gap:8px; margin-top:10px; }
+  .timePop .actions button{ border:none; border-radius:8px; padding:6px 12px;
+    font-family:inherit; font-size:14px; cursor:pointer; }
+  .timePop .clearBtn{ background:#F3ECDD; color:var(--ink); }
+  .timePop .doneBtn{ background:var(--pencil); color:#fff; }
 </style>
 </head>
 <body>
@@ -141,6 +161,18 @@
     </div>
   </div>
 
+  <div class="timePop hidden" id="timePop">
+    <div class="row2">
+      <input type="time" id="timeStart" aria-label="Start time">
+      <span>to</span>
+      <input type="time" id="timeEnd" aria-label="End time">
+    </div>
+    <div class="actions">
+      <button type="button" id="timeClear">Clear time</button>
+      <button type="button" id="timeDone">Done</button>
+    </div>
+  </div>
+
 <script>
 (function(){
   var KEY='todo:v1';
@@ -156,6 +188,11 @@
   var countEl=document.getElementById('count');
   var picker=document.getElementById('picker');
   var todayBtn=document.getElementById('today');
+  var timePop=document.getElementById('timePop');
+  var timeStart=document.getElementById('timeStart');
+  var timeEnd=document.getElementById('timeEnd');
+  var timeClear=document.getElementById('timeClear');
+  var timeDone=document.getElementById('timeDone');
 
   function iso(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
   function todayStr(){return iso(new Date());}
@@ -213,12 +250,12 @@
       .catch(function(){});
   }
 
-  function shift(n){var d=parseISO(state.current);d.setDate(d.getDate()+n);state.current=iso(d);
+  function shift(n){closeTimePop();var d=parseISO(state.current);d.setDate(d.getDate()+n);state.current=iso(d);
     save();render();syncDateFromServer(state.current);}
   document.getElementById('prev').onclick=function(){shift(-1);};
   document.getElementById('next').onclick=function(){shift(1);};
-  todayBtn.onclick=function(){state.current=todayStr();save();render();syncDateFromServer(state.current);};
-  picker.onchange=function(){if(picker.value){state.current=picker.value;
+  todayBtn.onclick=function(){closeTimePop();state.current=todayStr();save();render();syncDateFromServer(state.current);};
+  picker.onchange=function(){if(picker.value){closeTimePop();state.current=picker.value;
     save();render();syncDateFromServer(state.current);}};
 
   function addTask(){
@@ -234,7 +271,9 @@
   document.getElementById('addBtn').onclick=addTask;
   input.addEventListener('keydown',function(e){if(e.key==='Enter')addTask();});
 
-  function removeTask(id){var l=tasks();var i=l.findIndex(function(x){return x.id===id;});
+  function removeTask(id){
+    if(editingTask&&editingTask.id===id)closeTimePop();
+    var l=tasks();var i=l.findIndex(function(x){return x.id===id;});
     if(i>-1)l.splice(i,1); save(); render(); schedulePush(state.current);}
 
   function fitLines(count){
@@ -259,6 +298,44 @@
     var list=tasks(), left=list.filter(function(x){return !x.done;}).length;
     countEl.textContent=list.length?(left+' left of '+list.length):'';
   }
+
+  function fmt12h(hhmm){
+    var p=hhmm.split(':'), h=+p[0], m=p[1];
+    var ap=h>=12?'p':'a', h12=h%12; if(h12===0)h12=12;
+    return h12+(m==='00'?'':':'+m)+ap;
+  }
+  function timeRangeLabel(t){return fmt12h(t.start)+'–'+fmt12h(t.end);}
+  function updateTimeBtn(timeBtn,t){
+    if(t.start&&t.end){timeBtn.textContent=timeRangeLabel(t);timeBtn.classList.add('set');}
+    else{timeBtn.textContent='🕐';timeBtn.classList.remove('set');}
+  }
+
+  var editingTask=null;
+  function closeTimePop(){timePop.classList.add('hidden');editingTask=null;}
+  function openTimePop(btn,t){
+    editingTask=t;
+    timeStart.value=t.start||''; timeEnd.value=t.end||'';
+    timePop.classList.remove('hidden');
+    var r=btn.getBoundingClientRect();
+    var left=Math.max(8,Math.min(r.left,window.innerWidth-238));
+    timePop.style.top=(r.bottom+8)+'px'; timePop.style.left=left+'px';
+  }
+  function applyTimeChange(){
+    if(!editingTask)return;
+    editingTask.start=timeStart.value||null; editingTask.end=timeEnd.value||null;
+    save(); schedulePush(state.current); render();
+  }
+  timeStart.addEventListener('change',applyTimeChange);
+  timeEnd.addEventListener('change',applyTimeChange);
+  timeClear.addEventListener('click',function(){
+    timeStart.value=''; timeEnd.value=''; applyTimeChange(); closeTimePop();
+  });
+  timeDone.addEventListener('click',closeTimePop);
+  document.addEventListener('mousedown',function(e){
+    if(timePop.classList.contains('hidden'))return;
+    if(timePop.contains(e.target)||e.target.classList.contains('timeBtn'))return;
+    closeTimePop();
+  });
   function buildStrikeSvg(svg,txt){
     var w=Math.max(10,txt.clientWidth), h=Math.max(20,txt.clientHeight);
     svg.setAttribute('width',w); svg.setAttribute('height',h);
@@ -363,8 +440,15 @@
       li.innerHTML='<div class="reveal">tear out ✕</div><div class="card">'+
         '<span class="txt-wrap"><span class="txt"></span>'+
         '<svg class="strike" xmlns="http://www.w3.org/2000/svg"><path class="bg"></path><path class="fg"></path></svg>'+
-        '</span></div>';
+        '</span>'+
+        '<button class="timeBtn" type="button" aria-label="Set time for this task"></button>'+
+        '</div>';
       li.querySelector('.txt').textContent=t.text;
+      var timeBtn=li.querySelector('.timeBtn');
+      updateTimeBtn(timeBtn,t);
+      timeBtn.addEventListener('mousedown',function(e){e.stopPropagation();});
+      timeBtn.addEventListener('touchstart',function(e){e.stopPropagation();},{passive:true});
+      timeBtn.addEventListener('click',function(e){e.stopPropagation();openTimePop(timeBtn,t);});
       attachSwipeDelete(li,t);
       scroll.appendChild(li);
       requestAnimationFrame(function(){attachStrike(li,t);});

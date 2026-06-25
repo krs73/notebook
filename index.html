@@ -145,6 +145,10 @@
 (function(){
   var KEY='todo:v1';
   var MAX_LINE=45, MIN_LINE=26, TAP_PX=10, COMPLETE_AT=0.6, DELETE_TH=100, STRIKE_ANIM_MS=250;
+  var API_BASE='https://notebook-api-ruddy.vercel.app';
+  var API_KEY_STORAGE='todo:apikey';
+  var PUSH_DEBOUNCE_MS=600;
+  var timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone;
   var scroll=document.getElementById('scroll');
   var input=document.getElementById('add');
   var weekdayEl=document.getElementById('weekday');
@@ -162,22 +166,66 @@
   var state=load();
   function load(){
     try{var raw=localStorage.getItem(KEY);if(raw){var s=JSON.parse(raw);
-      if(!s.pages)s.pages={}; if(!s.current)s.current=todayStr(); return s;}}catch(e){}
-    return {current:todayStr(),pages:{}};
+      if(!s.pages)s.pages={}; if(!s.current)s.current=todayStr();
+      if(!s.pendingDates)s.pendingDates={}; return s;}}catch(e){}
+    return {current:todayStr(),pages:{},pendingDates:{}};
   }
   function save(){try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){}}
   function tasks(){return state.pages[state.current]||(state.pages[state.current]=[]);}
 
-  function shift(n){var d=parseISO(state.current);d.setDate(d.getDate()+n);state.current=iso(d);save();render();}
+  function getApiKey(){
+    var k=localStorage.getItem(API_KEY_STORAGE);
+    if(k===null){
+      k=window.prompt('Enter sync key for this device (leave blank to skip syncing):')||'';
+      try{localStorage.setItem(API_KEY_STORAGE,k);}catch(e){}
+    }
+    return k;
+  }
+  function apiUrl(date){return API_BASE+'/api/tasks?date='+date;}
+  function apiHeaders(key){return {'Content-Type':'application/json','x-api-key':key};}
+
+  var pushTimers={};
+  function schedulePush(date){
+    state.pendingDates[date]=true; save();
+    clearTimeout(pushTimers[date]);
+    pushTimers[date]=setTimeout(function(){flushPush(date);},PUSH_DEBOUNCE_MS);
+  }
+  function flushPush(date){
+    var key=getApiKey(); if(!key)return;
+    var body=JSON.stringify({timeZone:timeZone,tasks:state.pages[date]||[]});
+    fetch(apiUrl(date),{method:'PUT',headers:apiHeaders(key),body:body})
+      .then(function(r){if(!r.ok)throw new Error('bad status');return r.json();})
+      .then(function(data){
+        state.pages[date]=data.tasks; delete state.pendingDates[date]; save();
+        if(date===state.current)render();
+      })
+      .catch(function(){});
+  }
+  function syncDateFromServer(date){
+    var key=getApiKey(); if(!key)return;
+    if(state.pendingDates[date]){flushPush(date);return;}
+    fetch(apiUrl(date),{headers:apiHeaders(key)})
+      .then(function(r){if(!r.ok)throw new Error('bad status');return r.json();})
+      .then(function(data){
+        state.pages[date]=data.tasks; save();
+        if(date===state.current)render();
+      })
+      .catch(function(){});
+  }
+
+  function shift(n){var d=parseISO(state.current);d.setDate(d.getDate()+n);state.current=iso(d);
+    save();render();syncDateFromServer(state.current);}
   document.getElementById('prev').onclick=function(){shift(-1);};
   document.getElementById('next').onclick=function(){shift(1);};
-  todayBtn.onclick=function(){state.current=todayStr();save();render();};
-  picker.onchange=function(){if(picker.value){state.current=picker.value;save();render();}};
+  todayBtn.onclick=function(){state.current=todayStr();save();render();syncDateFromServer(state.current);};
+  picker.onchange=function(){if(picker.value){state.current=picker.value;
+    save();render();syncDateFromServer(state.current);}};
 
   function addTask(){
     var v=input.value.trim(); if(!v)return;
-    tasks().push({id:String(Date.now())+Math.floor(Math.random()*1000),text:v,done:false});
-    input.value=''; save(); render();
+    tasks().push({id:String(Date.now())+Math.floor(Math.random()*1000),text:v,done:false,
+      start:null,end:null,googleEventId:null});
+    input.value=''; save(); render(); schedulePush(state.current);
     requestAnimationFrame(function(){
       if(scroll.style.overflowY==='auto')scroll.scrollTop=scroll.scrollHeight;
     });
@@ -187,7 +235,7 @@
   input.addEventListener('keydown',function(e){if(e.key==='Enter')addTask();});
 
   function removeTask(id){var l=tasks();var i=l.findIndex(function(x){return x.id===id;});
-    if(i>-1)l.splice(i,1); save(); render();}
+    if(i>-1)l.splice(i,1); save(); render(); schedulePush(state.current);}
 
   function fitLines(count){
     var available=scroll.clientHeight||400;
@@ -252,7 +300,7 @@
       if(moved<TAP_PX){ if(!t.done)return; t.done=false; }
       else t.done=dragProgress(wrap,x)>=COMPLETE_AT;
       setStrikeProgress(svg,len,t.done?1:0,true);
-      li.classList.toggle('done',t.done); updateHeaderCounts(); save();
+      li.classList.toggle('done',t.done); updateHeaderCounts(); save(); schedulePush(state.current);
     }
 
     wrap.addEventListener('touchstart',function(e){e.stopPropagation();start(e.touches[0].clientX);},{passive:true});
@@ -329,6 +377,8 @@
   });
 
   render();
+  Object.keys(state.pendingDates).forEach(function(d){if(d!==state.current)flushPush(d);});
+  syncDateFromServer(state.current);
 })();
 </script>
 </body>

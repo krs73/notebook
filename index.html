@@ -235,7 +235,12 @@
     fetch(apiUrl(date),{method:'PUT',headers:apiHeaders(key),body:body})
       .then(function(r){if(!r.ok)throw new Error('bad status');return r.json();})
       .then(function(data){
+        var editId=editingTask?editingTask.id:null;
         state.pages[date]=data.tasks; delete state.pendingDates[date]; save();
+        if(editId){
+          var refreshed=(state.pages[date]||[]).find(function(t){return t.id===editId;});
+          if(refreshed)editingTask=refreshed;
+        }
         if(date===state.current)render();
       })
       .catch(function(){});
@@ -355,12 +360,12 @@
   timeClear.addEventListener('click',function(){
     timeStart.value=''; timeEnd.value=''; applyTimeChange(); closeTimePop();
   });
-  timeDone.addEventListener('click',closeTimePop);
+  timeDone.addEventListener('click',function(){ applyTimeChange(); closeTimePop(); });
   document.addEventListener('mousedown',function(e){
     if(timePop.classList.contains('hidden'))return;
     if(timePop.contains(e.target))return;
     if(Date.now()-timePopOpenedAt<OUTSIDE_CLOSE_GUARD_MS)return;
-    closeTimePop();
+    applyTimeChange(); closeTimePop();
   });
 
   function makeLongPress(opts){

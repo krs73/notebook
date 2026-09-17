@@ -150,6 +150,7 @@
       <div class="meta">
         <span class="count" id="count"></span>
         <button class="today" id="today">go to today</button>
+        <button class="today" id="moveApp">move to new app</button>
       </div>
     </div>
 
@@ -302,6 +303,25 @@
     });
     input.focus();
   }
+  // Hands every page on this device to the new app's import screen. The data
+  // travels in the URL fragment, which the browser never sends to a server.
+  var NEW_APP_IMPORT='https://krs73-notebook.vercel.app/import';
+  function toB64Url(bytes){
+    var bin='';for(var i=0;i<bytes.length;i+=0x8000){bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+0x8000));}
+    return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  }
+  document.getElementById('moveApp').onclick=function(){
+    var pages={};
+    Object.keys(state.pages).forEach(function(d){if((state.pages[d]||[]).length)pages[d]=state.pages[d];});
+    var raw=new TextEncoder().encode(JSON.stringify({pages:pages}));
+    var go=function(payload){window.location.href=NEW_APP_IMPORT+'#data='+payload;};
+    if(typeof CompressionStream==='undefined'){go(toB64Url(raw));return;}
+    var stream=new Blob([raw]).stream().pipeThrough(new CompressionStream('gzip'));
+    new Response(stream).arrayBuffer()
+      .then(function(buf){go('gz.'+toB64Url(new Uint8Array(buf)));})
+      .catch(function(){go(toB64Url(raw));});
+  };
+
   document.getElementById('addBtn').onclick=addTask;
   input.addEventListener('keydown',function(e){if(e.key==='Enter')addTask();});
 

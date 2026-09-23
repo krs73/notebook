@@ -305,7 +305,7 @@
   }
   // Hands every page on this device to the new app's import screen. The data
   // travels in the URL fragment, which the browser never sends to a server.
-  var NEW_APP_IMPORT='https://krs73-notebook.vercel.app/import';
+  var NEW_APP_IMPORT='https://gopaperday.com/import';
   function toB64Url(bytes){
     var bin='';for(var i=0;i<bytes.length;i+=0x8000){bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+0x8000));}
     return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
